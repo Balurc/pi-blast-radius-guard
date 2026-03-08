@@ -1,0 +1,16 @@
+{
+  "blastRadiusGuard": {
+    "block": ["critical"],
+    "confirm": ["high"],
+    "warn": ["medium"],
+    "allowList": [
+      "rm -rf node_modules",
+      "rm -rf .next",
+      "rm -rf dist"
+    ],
+    "blockList": [
+      "git push origin main",
+      "git push origin master"
+    ]
+  }
+}
