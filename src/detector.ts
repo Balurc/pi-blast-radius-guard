@@ -1,4 +1,10 @@
-import type { RiskPattern, DetectionResult, MatchedPattern, GuardConfig, RiskLevel } from "./types.js";
+import type {
+  RiskPattern,
+  DetectionResult,
+  MatchedPattern,
+  GuardConfig,
+  RiskLevel,
+} from "./types.js";
 
 // ─── Risk Patterns ────────────────────────────────────────────────────────────
 
