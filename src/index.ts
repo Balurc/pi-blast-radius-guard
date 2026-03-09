@@ -4,22 +4,17 @@ import { join } from "path";
 import type { ExtensionAPI, ToolCallEvent } from "@mariozechner/pi-coding-agent";
 import { isToolCallEventType } from "@mariozechner/pi-coding-agent";
 import { detectRisk, decide } from "./detector.js";
-import { DEFAULT_CONFIG, createSessionStats, type GuardConfig } from "./types.js";
-import { updateStatus, updateWidget, renderHistory } from "./ui.js";
-
-// ─── Config Loading ───────────────────────────────────────────────────────────
+import { DEFAULT_CONFIG, createSessionStats, recordEvent, type GuardConfig } from "./types.js";
+import { updateWidget, renderHistory } from "./ui.js";
 
 function loadConfig(): GuardConfig {
   const paths = [
     join(process.cwd(), ".pi", "settings.json"),
     join(homedir(), ".pi", "agent", "settings.json"),
   ];
-
-  for (const settingsPath of paths) {
+  for (const p of paths) {
     try {
-      const raw = readFileSync(settingsPath, "utf-8");
-      const parsed = JSON.parse(raw);
-      const guard = parsed?.blastRadiusGuard;
+      const guard = JSON.parse(readFileSync(p, "utf-8"))?.blastRadiusGuard;
       if (guard) {
         return {
           block: guard.block ?? DEFAULT_CONFIG.block,
@@ -30,27 +25,19 @@ function loadConfig(): GuardConfig {
         };
       }
     } catch {
-      // file doesn't exist or isn't valid JSON — try next path
+      // not found or invalid — try next
     }
   }
-
   return { ...DEFAULT_CONFIG };
 }
-
-// ─── Extension Entry Point ────────────────────────────────────────────────────
 
 export default function blastRadiusGuard(pi: ExtensionAPI): void {
   const config = loadConfig();
   const stats = createSessionStats();
 
-  // ─── Session Start — initialize UI ───────────────────────────────────────
-
   pi.on("session_start", (_event, ctx) => {
-    updateStatus(ctx.ui, stats);
     updateWidget(ctx.ui, stats);
   });
-
-  // ─── /guard-history command ───────────────────────────────────────────────
 
   pi.registerCommand("guard-history", {
     description: "Show Blast Radius Guard session history",
@@ -60,8 +47,6 @@ export default function blastRadiusGuard(pi: ExtensionAPI): void {
     },
   });
 
-  // ─── Intercept bash tool calls ────────────────────────────────────────────
-
   pi.on("tool_call", async (event: ToolCallEvent, ctx) => {
     if (!isToolCallEventType("bash", event)) return;
 
@@ -70,7 +55,6 @@ export default function blastRadiusGuard(pi: ExtensionAPI): void {
 
     const result = detectRisk(command);
     const decision = decide(result, config);
-
     const reasons = result.matches.map((m) => m.reason);
     const matchSummary = result.matches
       .map((m) => `  [${m.level.toUpperCase()}] ${m.reason}`)
@@ -80,97 +64,47 @@ export default function blastRadiusGuard(pi: ExtensionAPI): void {
       case "allow":
         return;
 
-      case "warn": {
-        // Record in history
-        stats.warned++;
-        stats.history.push({
-          timestamp: new Date(),
-          command,
-          level: result.level,
-          outcome: "warned",
-          reasons,
-        });
-
+      case "warn":
+        recordEvent(stats, command, result.level, "warned", reasons);
         ctx.ui.notify(
-          [`⚠️  Blast Radius Guard — medium risk detected:`, `   $ ${command}`, matchSummary].join(
-            "\n"
-          ),
+          [`⚠️  Blast Radius Guard — medium risk:`, `   $ ${command}`, matchSummary].join("\n"),
           "warning"
         );
-
-        updateStatus(ctx.ui, stats);
         updateWidget(ctx.ui, stats);
         return;
-      }
 
       case "confirm": {
         const approved = await ctx.ui.confirm(
           "🔶 Blast Radius Guard — High Risk Command",
           [`$ ${command}`, ``, matchSummary, ``, `Do you want to proceed?`].join("\n")
         );
-
-        if (!approved) {
-          stats.blocked++;
-          stats.history.push({
-            timestamp: new Date(),
-            command,
-            level: result.level,
-            outcome: "user-blocked",
-            reasons,
-          });
-
-          updateStatus(ctx.ui, stats);
-          updateWidget(ctx.ui, stats);
-
-          return {
-            block: true,
-            reason: "High risk command blocked by user via Blast Radius Guard.",
-          };
-        }
-
-        // User approved
-        stats.userAllowed++;
-        stats.history.push({
-          timestamp: new Date(),
+        recordEvent(
+          stats,
           command,
-          level: result.level,
-          outcome: "user-allowed",
-          reasons,
-        });
-
-        updateStatus(ctx.ui, stats);
+          result.level,
+          approved ? "user-allowed" : "user-blocked",
+          reasons
+        );
         updateWidget(ctx.ui, stats);
+        if (!approved) {
+          return { block: true, reason: "Blocked by user via Blast Radius Guard." };
+        }
         return;
       }
 
-      case "block": {
-        stats.blocked++;
-        stats.history.push({
-          timestamp: new Date(),
-          command,
-          level: result.level,
-          outcome: "blocked",
-          reasons,
-        });
-
+      case "block":
+        recordEvent(stats, command, result.level, "blocked", reasons);
         ctx.ui.notify(
           [
-            `🚫 Blast Radius Guard — CRITICAL command blocked:`,
+            `🚫 Blast Radius Guard — CRITICAL blocked:`,
             `   $ ${command}`,
             matchSummary,
-            `   Add to blastRadiusGuard.allowList in settings to override.`,
+            `   Add to blastRadiusGuard.allowList to override.`,
           ].join("\n"),
           "error"
         );
-
-        updateStatus(ctx.ui, stats);
         updateWidget(ctx.ui, stats);
-
-        return {
-          block: true,
-          reason: "Critical risk command automatically blocked by Blast Radius Guard.",
-        };
-      }
+        return { block: true, reason: "Critical command blocked by Blast Radius Guard." };
     }
   });
 }

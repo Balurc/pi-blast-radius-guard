@@ -37,11 +37,7 @@ export const DEFAULT_CONFIG: GuardConfig = {
 
 // ─── Session Tracking ─────────────────────────────────────────────────────────
 
-export type InterceptOutcome =
-  | "blocked" // auto-blocked (critical)
-  | "user-blocked" // user said No to confirm
-  | "user-allowed" // user said Yes to confirm
-  | "warned"; // medium — warned but allowed through
+export type InterceptOutcome = "blocked" | "user-blocked" | "user-allowed" | "warned";
 
 export interface HistoryEntry {
   timestamp: Date;
@@ -52,17 +48,26 @@ export interface HistoryEntry {
 }
 
 export interface SessionStats {
-  blocked: number; // auto-blocked + user-blocked
-  warned: number; // warned but allowed
-  userAllowed: number; // user explicitly approved high risk
+  blocked: number;
+  warned: number;
+  userAllowed: number;
   history: HistoryEntry[];
 }
 
 export function createSessionStats(): SessionStats {
-  return {
-    blocked: 0,
-    warned: 0,
-    userAllowed: 0,
-    history: [],
-  };
+  return { blocked: 0, warned: 0, userAllowed: 0, history: [] };
+}
+
+export function recordEvent(
+  stats: SessionStats,
+  command: string,
+  level: RiskLevel,
+  outcome: InterceptOutcome,
+  reasons: string[]
+): void {
+  if (outcome === "blocked" || outcome === "user-blocked") stats.blocked++;
+  else if (outcome === "warned") stats.warned++;
+  else if (outcome === "user-allowed") stats.userAllowed++;
+
+  stats.history.push({ timestamp: new Date(), command, level, outcome, reasons });
 }
