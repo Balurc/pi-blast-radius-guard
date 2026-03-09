@@ -13,6 +13,11 @@ Blast Radius Guard monitors every `bash` tool call pi makes and scores it for da
 | ⚠️ **Medium** | Warning shown | `kill`, `git reset --hard`, `DROP TABLE` |
 | ✅ **Low** | Silent allow | Everything else |
 
+A compact widget stays visible above the editor throughout your session:
+```
+🛡 BRG  🚫 2 · ⚠️ 1 · 🔶 1  |  Last: [HIGH] sudo ls /tmp
+```
+
 ## Installation
 ```bash
 pi install github:Balurc/pi-blast-radius-guard
@@ -68,6 +73,9 @@ Add to your `~/.pi/agent/settings.json` or project `.pi/settings.json`:
 - `dd if=` — low-level disk write
 - `chmod -R 777` — recursive world-writable permissions
 
+![Critical block](docs/screenshots/critical-block.png)
+*🚫 Critical commands are automatically blocked*
+
 ### High 🔶
 - `sudo` — elevated privileges
 - `git push --force` / `git push -f` — force push
@@ -76,9 +84,38 @@ Add to your `~/.pi/agent/settings.json` or project `.pi/settings.json`:
 - `chmod 777` — world-writable file
 - Overwriting dotfiles (`> ~/.bashrc` etc.)
 
+![Confirm dialog](docs/screenshots/confirm-dialog.png)
+*🔶 High risk commands require confirmation*
+
 ### Medium ⚠️
 - `kill` / `pkill` / `killall` — process termination
 - `git reset --hard` — discard uncommitted changes
 - `git clean -fd` — remove untracked files
 - `DROP TABLE` / `TRUNCATE TABLE` — destructive SQL
 - `brew uninstall` / `npm uninstall` — removing packages
+
+![Medium warning](docs/screenshots/medium-warning.png)
+*⚠️ Medium risk commands show a warning but proceed*
+
+## Session History
+
+Run `/guard-history` at any time to see a full log of everything intercepted this session:
+```
+  🛡 Blast Radius Guard — Session History
+  ────────────────────────────────────────────────
+  [08:16] ⚠️ MEDIUM    git reset --hard HEAD
+           Warning shown, allowed
+           › Hard reset — discards all uncommitted changes permanently
+
+  [08:22] 🚫 CRITICAL  rm -rf /tmp/pi-test
+           Auto-blocked
+           › Recursive force delete — permanently removes files with no recovery
+
+  [08:23] 🔶 HIGH      chmod 777 package.json
+           Approved by user
+           › World-writable permissions — any user can read/write/execute
+  ────────────────────────────────────────────────
+  🚫 4 blocked · ⚠️ 1 warned · 🔶 1 approved
+```
+![Session history](docs/screenshots/session-history.png)
+*📜 /guard-history shows full session log with timestamps*
