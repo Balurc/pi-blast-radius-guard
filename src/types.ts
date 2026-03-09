@@ -1,22 +1,15 @@
 export type RiskLevel = "low" | "medium" | "high" | "critical";
 
 export interface RiskPattern {
-  // The regex pattern to match against the command
   pattern: RegExp;
-  // Risk level of this pattern
   level: RiskLevel;
-  // Human readable reason shown to the user
   reason: string;
-  // Example of what this catches
   example: string;
 }
 
 export interface DetectionResult {
-  // The original command that was analyzed
   command: string;
-  // Highest risk level found (or "low" if nothing matched)
   level: RiskLevel;
-  // All matched patterns
   matches: MatchedPattern[];
 }
 
@@ -27,15 +20,10 @@ export interface MatchedPattern {
 }
 
 export interface GuardConfig {
-  // Risk levels that should be blocked entirely
   block: RiskLevel[];
-  // Risk levels that should prompt for confirmation
   confirm: RiskLevel[];
-  // Risk levels that should just log a warning
   warn: RiskLevel[];
-  // Specific commands to always allow (override any pattern)
   allowList: string[];
-  // Specific commands to always block (override allowList)
   blockList: string[];
 }
 
@@ -46,3 +34,35 @@ export const DEFAULT_CONFIG: GuardConfig = {
   allowList: [],
   blockList: [],
 };
+
+// ─── Session Tracking ─────────────────────────────────────────────────────────
+
+export type InterceptOutcome =
+  | "blocked" // auto-blocked (critical)
+  | "user-blocked" // user said No to confirm
+  | "user-allowed" // user said Yes to confirm
+  | "warned"; // medium — warned but allowed through
+
+export interface HistoryEntry {
+  timestamp: Date;
+  command: string;
+  level: RiskLevel;
+  outcome: InterceptOutcome;
+  reasons: string[];
+}
+
+export interface SessionStats {
+  blocked: number; // auto-blocked + user-blocked
+  warned: number; // warned but allowed
+  userAllowed: number; // user explicitly approved high risk
+  history: HistoryEntry[];
+}
+
+export function createSessionStats(): SessionStats {
+  return {
+    blocked: 0,
+    warned: 0,
+    userAllowed: 0,
+    history: [],
+  };
+}

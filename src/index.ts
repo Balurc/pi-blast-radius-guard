@@ -4,7 +4,8 @@ import { join } from "path";
 import type { ExtensionAPI, ToolCallEvent } from "@mariozechner/pi-coding-agent";
 import { isToolCallEventType } from "@mariozechner/pi-coding-agent";
 import { detectRisk, decide } from "./detector.js";
-import { DEFAULT_CONFIG, type GuardConfig } from "./types.js";
+import { DEFAULT_CONFIG, createSessionStats, type GuardConfig } from "./types.js";
+import { updateStatus, updateWidget, renderHistory } from "./ui.js";
 
 // ─── Config Loading ───────────────────────────────────────────────────────────
 
@@ -40,9 +41,28 @@ function loadConfig(): GuardConfig {
 
 export default function blastRadiusGuard(pi: ExtensionAPI): void {
   const config = loadConfig();
+  const stats = createSessionStats();
+
+  // ─── Session Start — initialize UI ───────────────────────────────────────
+
+  pi.on("session_start", (_event, ctx) => {
+    updateStatus(ctx.ui, stats);
+    updateWidget(ctx.ui, stats);
+  });
+
+  // ─── /guard-history command ───────────────────────────────────────────────
+
+  pi.registerCommand("guard-history", {
+    description: "Show Blast Radius Guard session history",
+    handler: (_args, ctx) => {
+      ctx.ui.notify(renderHistory(stats), "info");
+      return Promise.resolve();
+    },
+  });
+
+  // ─── Intercept bash tool calls ────────────────────────────────────────────
 
   pi.on("tool_call", async (event: ToolCallEvent, ctx) => {
-    // Use the official type guard to narrow to bash events
     if (!isToolCallEventType("bash", event)) return;
 
     const command = event.input.command ?? "";
@@ -51,6 +71,7 @@ export default function blastRadiusGuard(pi: ExtensionAPI): void {
     const result = detectRisk(command);
     const decision = decide(result, config);
 
+    const reasons = result.matches.map((m) => m.reason);
     const matchSummary = result.matches
       .map((m) => `  [${m.level.toUpperCase()}] ${m.reason}`)
       .join("\n");
@@ -59,30 +80,79 @@ export default function blastRadiusGuard(pi: ExtensionAPI): void {
       case "allow":
         return;
 
-      case "warn":
+      case "warn": {
+        // Record in history
+        stats.warned++;
+        stats.history.push({
+          timestamp: new Date(),
+          command,
+          level: result.level,
+          outcome: "warned",
+          reasons,
+        });
+
         ctx.ui.notify(
           [`⚠️  Blast Radius Guard — medium risk detected:`, `   $ ${command}`, matchSummary].join(
             "\n"
           ),
           "warning"
         );
+
+        updateStatus(ctx.ui, stats);
+        updateWidget(ctx.ui, stats);
         return;
+      }
 
       case "confirm": {
         const approved = await ctx.ui.confirm(
           "🔶 Blast Radius Guard — High Risk Command",
           [`$ ${command}`, ``, matchSummary, ``, `Do you want to proceed?`].join("\n")
         );
+
         if (!approved) {
+          stats.blocked++;
+          stats.history.push({
+            timestamp: new Date(),
+            command,
+            level: result.level,
+            outcome: "user-blocked",
+            reasons,
+          });
+
+          updateStatus(ctx.ui, stats);
+          updateWidget(ctx.ui, stats);
+
           return {
             block: true,
             reason: "High risk command blocked by user via Blast Radius Guard.",
           };
         }
+
+        // User approved
+        stats.userAllowed++;
+        stats.history.push({
+          timestamp: new Date(),
+          command,
+          level: result.level,
+          outcome: "user-allowed",
+          reasons,
+        });
+
+        updateStatus(ctx.ui, stats);
+        updateWidget(ctx.ui, stats);
         return;
       }
 
-      case "block":
+      case "block": {
+        stats.blocked++;
+        stats.history.push({
+          timestamp: new Date(),
+          command,
+          level: result.level,
+          outcome: "blocked",
+          reasons,
+        });
+
         ctx.ui.notify(
           [
             `🚫 Blast Radius Guard — CRITICAL command blocked:`,
@@ -92,10 +162,15 @@ export default function blastRadiusGuard(pi: ExtensionAPI): void {
           ].join("\n"),
           "error"
         );
+
+        updateStatus(ctx.ui, stats);
+        updateWidget(ctx.ui, stats);
+
         return {
           block: true,
           reason: "Critical risk command automatically blocked by Blast Radius Guard.",
         };
+      }
     }
   });
 }
