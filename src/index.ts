@@ -1,100 +1,101 @@
+import { readFileSync } from "fs";
+import { homedir } from "os";
+import { join } from "path";
+import type { ExtensionAPI, ToolCallEvent } from "@mariozechner/pi-coding-agent";
+import { isToolCallEventType } from "@mariozechner/pi-coding-agent";
 import { detectRisk, decide } from "./detector.js";
 import { DEFAULT_CONFIG, type GuardConfig } from "./types.js";
 
-// ─── Types ────────────────────────────────────────────────────────────────────
+// ─── Config Loading ───────────────────────────────────────────────────────────
 
-// Minimal pi ExtensionAPI types we need
-// Full types are provided by pi at runtime
-interface ToolCallEvent {
-  name: string;
-  input: Record<string, unknown>;
-}
+function loadConfig(): GuardConfig {
+  const paths = [
+    join(process.cwd(), ".pi", "settings.json"),
+    join(homedir(), ".pi", "agent", "settings.json"),
+  ];
 
-interface ExtensionAPI {
-  on(
-    event: "tool_call",
-    handler: (event: ToolCallEvent) => Promise<string | undefined> | string | undefined
-  ): void;
-  getConfig<T>(key: string, defaultValue: T): T;
-  log(message: string): void;
-  confirm(message: string): Promise<boolean>;
-  warning(message: string): void;
-  error(message: string): void;
+  for (const settingsPath of paths) {
+    try {
+      const raw = readFileSync(settingsPath, "utf-8");
+      const parsed = JSON.parse(raw);
+      const guard = parsed?.blastRadiusGuard;
+      if (guard) {
+        return {
+          block: guard.block ?? DEFAULT_CONFIG.block,
+          confirm: guard.confirm ?? DEFAULT_CONFIG.confirm,
+          warn: guard.warn ?? DEFAULT_CONFIG.warn,
+          allowList: guard.allowList ?? DEFAULT_CONFIG.allowList,
+          blockList: guard.blockList ?? DEFAULT_CONFIG.blockList,
+        };
+      }
+    } catch {
+      // file doesn't exist or isn't valid JSON — try next path
+    }
+  }
+
+  return { ...DEFAULT_CONFIG };
 }
 
 // ─── Extension Entry Point ────────────────────────────────────────────────────
 
 export default function blastRadiusGuard(pi: ExtensionAPI): void {
-  // Load config from pi settings, falling back to safe defaults
-  const config: GuardConfig = {
-    block: pi.getConfig("blastRadiusGuard.block", DEFAULT_CONFIG.block),
-    confirm: pi.getConfig("blastRadiusGuard.confirm", DEFAULT_CONFIG.confirm),
-    warn: pi.getConfig("blastRadiusGuard.warn", DEFAULT_CONFIG.warn),
-    allowList: pi.getConfig("blastRadiusGuard.allowList", DEFAULT_CONFIG.allowList),
-    blockList: pi.getConfig("blastRadiusGuard.blockList", DEFAULT_CONFIG.blockList),
-  };
+  const config = loadConfig();
 
-  pi.log("Blast Radius Guard active 🛡️");
+  pi.on("tool_call", async (event: ToolCallEvent, ctx) => {
+    // Use the official type guard to narrow to bash events
+    if (!isToolCallEventType("bash", event)) return;
 
-  // ─── Intercept bash tool calls ─────────────────────────────────────────────
-
-  pi.on("tool_call", async (event) => {
-    // Only care about bash calls
-    if (event.name !== "bash") return undefined;
-
-    const command = String(event.input["command"] ?? "");
-    if (!command.trim()) return undefined;
+    const command = event.input.command ?? "";
+    if (!command.trim()) return;
 
     const result = detectRisk(command);
     const decision = decide(result, config);
 
-    // Build a summary of what was matched
     const matchSummary = result.matches
       .map((m) => `  [${m.level.toUpperCase()}] ${m.reason}`)
       .join("\n");
 
     switch (decision) {
       case "allow":
-        return undefined; // proceed silently
+        return;
 
       case "warn":
-        pi.warning(
-          [
-            `⚠️  Blast Radius Guard — medium risk command detected:`,
-            `   $ ${command}`,
-            matchSummary,
-            `   Proceeding automatically.`,
-          ].join("\n")
+        ctx.ui.notify(
+          [`⚠️  Blast Radius Guard — medium risk detected:`, `   $ ${command}`, matchSummary].join(
+            "\n"
+          ),
+          "warning"
         );
-        return undefined; // allow but warned
+        return;
 
       case "confirm": {
-        const message = [
-          `🔶 Blast Radius Guard — high risk command:`,
-          `   $ ${command}`,
-          matchSummary,
-          `\nDo you want to proceed?`,
-        ].join("\n");
-
-        const approved = await pi.confirm(message);
-
+        const approved = await ctx.ui.confirm(
+          "🔶 Blast Radius Guard — High Risk Command",
+          [`$ ${command}`, ``, matchSummary, ``, `Do you want to proceed?`].join("\n")
+        );
         if (!approved) {
-          return "Command blocked by user via Blast Radius Guard.";
+          return {
+            block: true,
+            reason: "High risk command blocked by user via Blast Radius Guard.",
+          };
         }
-        return undefined; // user approved, proceed
+        return;
       }
 
       case "block":
-        pi.error(
+        ctx.ui.notify(
           [
             `🚫 Blast Radius Guard — CRITICAL command blocked:`,
             `   $ ${command}`,
             matchSummary,
-            `   This command was automatically blocked.`,
-            `   To allow it, add it to blastRadiusGuard.allowList in your pi settings.`,
-          ].join("\n")
+            `   Add to blastRadiusGuard.allowList in settings to override.`,
+          ].join("\n"),
+          "error"
         );
-        return "Command automatically blocked by Blast Radius Guard (critical risk level).";
+        return {
+          block: true,
+          reason: "Critical risk command automatically blocked by Blast Radius Guard.",
+        };
     }
   });
 }
