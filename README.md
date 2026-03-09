@@ -15,7 +15,7 @@ Blast Radius Guard monitors every `bash` tool call pi makes and scores it for da
 
 ## Installation
 ```bash
-pi install github:YOURUSERNAME/pi-blast-radius-guard
+pi install github:Balurc/pi-blast-radius-guard
 ```
 
 Or locally during development:
@@ -82,38 +82,3 @@ Add to your `~/.pi/agent/settings.json` or project `.pi/settings.json`:
 - `git clean -fd` — remove untracked files
 - `DROP TABLE` / `TRUNCATE TABLE` — destructive SQL
 - `brew uninstall` / `npm uninstall` — removing packages
-
-## Development
-```bash
-# Install dependencies
-npm install
-
-# Run tests
-npm test
-
-# Run tests in watch mode
-npm run test:watch
-
-# Type check
-npm run typecheck
-
-# Lint
-npm run lint
-
-# Format
-npm run format
-
-# Run all checks
-npm run check
-```
-
-## Contributing
-
-PRs welcome! If you have a dangerous pattern that should be added, open an issue with:
-- The pattern
-- The risk level you think it deserves
-- A real-world example of the harm it could cause
-
-## License
-
-MIT
