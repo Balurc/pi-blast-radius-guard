@@ -1,0 +1,12 @@
+# Dev files
+tests/
+coverage/
+.github/
+docs/
+
+# Config files
+tsconfig.json
+.eslintrc.json
+.prettierrc
+vitest.config.ts
+eslint.config.js
